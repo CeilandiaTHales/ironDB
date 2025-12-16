@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. N8N STACK (Automação)
+  # ==========================================
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - NODE_ENV=production
+      - N8N_HOST=${DOMAIN_NAME:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${DOMAIN_NAME:-localhost}/webhook
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n-postgres
+      - DB_POSTGRESDB_USER=${N8N_DB_USER:-n8n}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASS:-n8npassword}
+      - DB_POSTGRESDB_DATABASE=n8n
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=n8n-redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    depends_on:
+      n8n-postgres:
+        condition: service_healthy
+      n8n-redis:
+        condition: service_healthy
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  n8n-worker:
+    image: n8nio/n8n:latest
+    restart: always
+    command: worker
+    environment:
+      - NODE_ENV=production
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - EXECUTIONS_MODE=queue
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n-postgres
+      - DB_POSTGRESDB_USER=${N8N_DB_USER:-n8n}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASS:-n8npassword}
+      - DB_POSTGRESDB_DATABASE=n8n
+      - QUEUE_BULL_REDIS_HOST=n8n-redis
+      - QUEUE_BULL_REDIS_PORT=6379
+    depends_on:
+      n8n-postgres:
+        condition: service_healthy
+      n8n-redis:
+        condition: service_healthy
+
+  n8n-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${N8N_DB_USER:-n8n}
+      - POSTGRES_PASSWORD=${N8N_DB_PASS:-n8npassword}
+      - POSTGRES_DB=n8n
+    volumes:
+      - n8n_db_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${N8N_DB_USER:-n8n} -d n8n"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - n8n_redis_storage:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 2. IRONDB STACK (Seu BaaS Seguro)
+  # ==========================================
+  
+  # Banco de Dados de Produção (SEPARADO do n8n)
+  irondb-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASS:-securepassword}
+      - POSTGRES_DB=${DB_NAME:-irondb_prod}
+    volumes:
+      - irondb_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Exposto para acesso externo se necessário (cuidado!)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (Cérebro)
+  irondb-api:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - POSTGRES_HOST=irondb-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASS:-securepassword}
+      - POSTGRES_DB=${DB_NAME:-irondb_prod}
+      - REDIS_HOST=n8n-redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-changeme}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - FRONTEND_URL=https://${DOMAIN_NAME:-localhost}
+    depends_on:
+      irondb-postgres:
+        condition: service_healthy
+      n8n-redis:
+        condition: service_healthy
+
+  # Worker de Filas (Músculos)
+  irondb-worker:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["node", "worker.js"]
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=irondb-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASS:-securepassword}
+      - POSTGRES_DB=${DB_NAME:-irondb_prod}
+      - REDIS_HOST=n8n-redis
+      - REDIS_PORT=6379
+    depends_on:
+      irondb-postgres:
+        condition: service_healthy
+      n8n-redis:
+        condition: service_healthy
+
+  # Frontend Studio (A Cara - Servido via Nginx)
+  irondb-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      irondb-api:
+        condition: service_started
+
+volumes:
+  n8n_data:
+  n8n_db_storage:
+  n8n_redis_storage:
+  irondb_data:

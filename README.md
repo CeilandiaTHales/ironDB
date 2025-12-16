@@ -1,5 +1,152 @@
 # IronDB Stack – Docker Compose (Bare Metal)
 
+
+## 🏗️ IronDB Stack (Supabase Alternative)
+
+O **IronDB** é uma arquitetura **BaaS (Backend-as-a-Service) autohospedada**, projetada como uma **alternativa direta ao Supabase**, com foco em:
+
+- Controle total da infraestrutura
+- Segurança em modo **Bare Metal**
+- Processamento assíncrono de alta performance
+- Eliminação de gargalos no banco de dados
+
+Diferente de soluções modulares genéricas, o IronDB **desacopla completamente a camada de API da camada de processamento pesado (Workers)**.  
+Isso garante que o banco de dados permaneça estável, mesmo sob cargas intensas, enquanto a API continua rápida e previsível.
+
+---
+
+## 🛠️ Stack Tecnológico
+
+### Core Infrastructure
+
+- **Containerização:** Docker & Docker Compose  
+  Orquestração pura, sem dependência de Portainer ou Dokploy.
+- **Proxy Reverso:** Nginx  
+  Serve o frontend estático e faz o roteamento interno da API.
+- **Message Broker:** Redis 7  
+  Gerenciamento de filas e cache, compartilhado com o n8n.
+- **Database:** PostgreSQL 16  
+  Instância dedicada para dados de produção, totalmente isolada do n8n.
+
+---
+
+### Backend — *The Brain & Muscle*
+
+- **Runtime:** Node.js (Express)
+- **Camada de Segurança:**
+  - Helmet (security headers)
+  - CORS restrito
+  - Express Rate Limit (proteção contra DDoS e brute force)
+- **Autenticação:**
+  - Passport.js (Google OAuth 2.0)
+  - JWT (autenticação stateless)
+- **Engine de Filas:** BullMQ (baseado em Redis)
+- **Cliente de Banco:** node-postgres (`pg`)  
+  Queries parametrizadas, protegendo contra SQL Injection.
+
+---
+
+### Frontend Studio — *The Face*
+
+- **Framework:** React 18 + Vite
+- **Estilo:** Tailwind CSS + Lucide React Icons
+- **Linguagem:** TypeScript
+
+---
+
+## 🚀 Funcionalidades Principais
+
+### 1. IronDB Studio (Painel Administrativo)
+
+Interface visual para gerenciamento completo do banco de dados, sem necessidade de linha de comando.
+
+#### Editor de Tabelas
+- Visualização de schemas e tabelas existentes
+- Controle visual de **RLS (Row Level Security)**  
+  Ativação/desativação instantânea
+- Visualização de dados brutos (Data Grid)
+
+#### SQL Runner
+- Editor SQL completo
+- Execução de queries arbitrárias
+- Métricas de performance:
+  - Tempo de execução
+  - Quantidade de linhas afetadas
+
+#### Gerenciador de RPC (Remote Procedure Calls)
+- Listagem de funções PostgreSQL armazenadas
+- Visualização do código-fonte
+- Templates para criação de novas funções  
+  (Business Logic diretamente no banco)
+
+#### Gestão de Usuários
+- Visualização centralizada da tabela `users`
+- Identificação do provedor de autenticação  
+  (Google vs Email)
+
+---
+
+### 2. Backend API Segura
+
+Camada de API robusta, criada para substituir o papel do **Kong** no Supabase.
+
+- **Autenticação híbrida:** Google OAuth + JWT
+- **API Gateway Interno:**
+  - `POST /api/query`  
+    Execução segura de SQL validado por token
+  - `POST /api/enqueue`  
+    Entrada para tarefas pesadas (envio imediato ao Redis)
+- **Proteção Ativa:**
+  - Rate limiting por IP
+  - Proteção contra XSS, sniffing e ataques comuns via Helmet
+
+---
+
+### 3. Workers de Alta Performance (Filas)
+
+O principal diferencial da arquitetura: **o banco de dados nunca trava**.
+
+- **Processamento assíncrono:**  
+  A API responde imediatamente, o Worker processa em background.
+- **BullMQ + Redis:**  
+  Preparado para milhões de jobs.
+- **Tipos de Jobs suportados:**
+  - `bulk_insert` — inserções massivas sem bloquear a API
+  - `rpc_trigger` — execução de funções pesadas no banco
+- **Resiliência:**  
+  Retry automático em caso de falhas.
+- **Concorrência controlada:**  
+  Evita exaustão do pool de conexões do PostgreSQL.
+
+---
+
+### 4. Integração Nativa com n8n
+
+- **Ecossistema unificado:**  
+  n8n executando na mesma rede Docker.
+- **Latência mínima:**  
+  Comunicação direta com `irondb-api` e `irondb-postgres`.
+- **Redis compartilhado:**  
+  Uso otimizado da mesma instância para automações e filas.
+- **Isolamento total de dados:**
+  - `n8n-postgres` → metadados do n8n
+  - `irondb-postgres` → dados de produção dos usuários
+
+---
+
+## 🛡️ Resumo de Segurança
+
+- **Sem exposição desnecessária:**  
+  Banco de dados e API acessíveis apenas na rede interna Docker.
+- **SQL Injection Proof:**  
+  Uso exclusivo de queries parametrizadas.
+- **DDoS Mitigation:**  
+  Rate limiting configurado por IP.
+- **JWT obrigatório:**  
+  Todas as rotas sensíveis exigem token válido.
+
+
+
 Este repositório descreve uma **arquitetura limpa e enxuta** para rodar **n8n + IronDB** usando **Docker Compose puro**, sem Dokploy, Portainer ou outras camadas intermediárias.
 
 A ideia é **reduzir complexidade**, manter **controle total via arquivos** e ter **isolamento claro de responsabilidades**.
